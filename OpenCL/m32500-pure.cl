@@ -328,7 +328,7 @@ KERNEL_FQ void m32500_loop (KERN_ATTR_TMPS_ESALT (doge_tmp_t, payload_t))
   }
 }
 
-KERNEL_FQ void m32500_comp (KERN_ATTR_TMPS_ESALT (doge_tmp_t, payload_t))
+KERNEL_FQ void m32500_comp_1 (KERN_ATTR_TMPS_ESALT (doge_tmp_t, payload_t))
 {
    /**
    * base
@@ -455,3 +455,111 @@ KERNEL_FQ void m32500_comp (KERN_ATTR_TMPS_ESALT (doge_tmp_t, payload_t))
   #include COMPARE_M
   #endif
 }
+
+KERNEL_FQ void m32500_comp (KERN_ATTR_TMPS_ESALT (doge_tmp_t, payload_t))
+{
+  const u64 gid = get_global_id (0);
+  const u64 lid = get_local_id(0);
+  const u64 lsz = get_local_size(0);
+
+  #ifdef REAL_SHM
+  LOCAL_VK u32 s_td0[256];
+  LOCAL_VK u32 s_td1[256];
+  LOCAL_VK u32 s_td2[256];
+  LOCAL_VK u32 s_td3[256];
+  LOCAL_VK u32 s_td4[256];
+
+  LOCAL_VK u32 s_te0[256];
+  LOCAL_VK u32 s_te1[256];
+  LOCAL_VK u32 s_te2[256];
+  LOCAL_VK u32 s_te3[256];
+  LOCAL_VK u32 s_te4[256];
+
+  for (u32 i = lid; i < 256; i += lsz)
+  {
+    s_td0[i] = td0[i];
+    s_td1[i] = td1[i];
+    s_td2[i] = td2[i];
+    s_td3[i] = td3[i];
+    s_td4[i] = td4[i];
+
+    s_te0[i] = te0[i];
+    s_te1[i] = te1[i];
+    s_te2[i] = te2[i];
+    s_te3[i] = te3[i];
+    s_te4[i] = te4[i];
+  }
+
+  SYNC_THREADS();
+  #else
+  CONSTANT_AS u32a* s_td0 = td0;
+  CONSTANT_AS u32a* s_td1 = td1;
+  CONSTANT_AS u32a* s_td2 = td2;
+  CONSTANT_AS u32a* s_td3 = td3;
+  CONSTANT_AS u32a* s_td4 = td4;
+
+  CONSTANT_AS u32a* s_te0 = te0;
+  CONSTANT_AS u32a* s_te1 = te1;
+  CONSTANT_AS u32a* s_te2 = te2;
+  CONSTANT_AS u32a* s_te3 = te3;
+  CONSTANT_AS u32a* s_te4 = te4;
+  #endif
+
+  if (gid >= GID_CNT) return;
+
+  // lấy AES key
+  u32 ukey[8];
+  for (int i = 0; i < 8; i++) ukey[i] = tmps[gid].out[i];
+
+  u32 ks[60];
+  AES256_set_decrypt_key (ks, ukey, s_te0, s_te1, s_te2, s_te3, s_td0, s_td1, s_td2, s_td3);
+
+  // lấy IV (block đầu tiên)
+  u32 prev_ct[4];
+  for (int i = 0; i < 4; i++)
+  {
+    prev_ct[i] = hc_swap32 (esalt_bufs[DIGESTS_OFFSET_HOST].pl_buf[i]);
+  }
+
+  // lấy block thứ hai (là block đầu tiên thực sự cần giải mã)
+  u32 ct_buf[4];
+  for (int i = 0; i < 4; i++)
+  {
+    ct_buf[i] = hc_swap32_S (esalt_bufs[DIGESTS_OFFSET_HOST].pl_buf[i + 4]);
+  }
+
+  u32 pt_buf[4];
+  AES256_decrypt (ks, ct_buf, pt_buf, s_td0, s_td1, s_td2, s_td3, s_td4);
+
+  for (int i = 0; i < 4; i++)
+  {
+    pt_buf[i] ^= prev_ct[i]; // CBC mode: XOR với IV
+  }  
+  u32 r0 = 0;
+  u8 *p = (u8 *) pt_buf;
+
+  if (p[0] == 0x7b &&  
+      p[1] == 0x22 &&  
+      p[2] == 0x67 &&  
+      p[3] == 0x75 &&  
+      p[4] == 0x69 &&  
+      p[5] == 0x64)    
+  {
+    r0 = 0; // hợp lệ
+  }
+  else
+  {
+    r0 = 1; // không hợp lệ
+  }
+
+  const u32 r1 = 0;
+  const u32 r2 = 0;
+  const u32 r3 = 0;
+
+  #define il_pos 0
+
+  #ifdef KERNEL_STATIC
+  #include COMPARE_M
+  #endif
+}
+
