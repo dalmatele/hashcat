@@ -507,57 +507,46 @@ KERNEL_FQ void m32500_comp (KERN_ATTR_TMPS_ESALT (doge_tmp_t, payload_t))
 
   if (gid >= GID_CNT) return;
 
-  // lấy AES key
   u32 ukey[8];
+
+  #pragma unroll
   for (int i = 0; i < 8; i++) ukey[i] = tmps[gid].out[i];
 
   u32 ks[60];
   AES256_set_decrypt_key (ks, ukey, s_te0, s_te1, s_te2, s_te3, s_td0, s_td1, s_td2, s_td3);
 
-  // lấy IV (block đầu tiên)
-  u32 prev_ct[4];
-  for (int i = 0; i < 4; i++)
-  {
-    prev_ct[i] = hc_swap32 (esalt_bufs[DIGESTS_OFFSET_HOST].pl_buf[i]);
-  }
+  // Load IV
+  u32 iv[4];
+  #pragma unroll
+  for (int i = 0; i < 4; i++) iv[i] = hc_swap32 (esalt_bufs[DIGESTS_OFFSET_HOST].pl_buf[i]);
 
-  // lấy block thứ hai (là block đầu tiên thực sự cần giải mã)
+  // Load first ciphertext block
   u32 ct_buf[4];
-  for (int i = 0; i < 4; i++)
-  {
-    ct_buf[i] = hc_swap32_S (esalt_bufs[DIGESTS_OFFSET_HOST].pl_buf[i + 4]);
-  }
+  #pragma unroll
+  for (int i = 0; i < 4; i++) ct_buf[i] = hc_swap32_S (esalt_bufs[DIGESTS_OFFSET_HOST].pl_buf[i + 4]);
 
   u32 pt_buf[4];
   AES256_decrypt (ks, ct_buf, pt_buf, s_td0, s_td1, s_td2, s_td3, s_td4);
 
-  for (int i = 0; i < 4; i++)
-  {
-    pt_buf[i] ^= prev_ct[i]; // CBC mode: XOR với IV
-  }  
-  u32 r0 = 0;
-  u8 *p = (u8 *) pt_buf;
+  // XOR with IV (CBC mode)
+  #pragma unroll
+  for (int i = 0; i < 4; i++) pt_buf[i] ^= iv[i];
+  
+  u8 *pt = (u8 *)pt_buf;
 
-  if (p[0] == 0x7b &&  
-      p[1] == 0x22 &&  
-      p[2] == 0x67 &&  
-      p[3] == 0x75 &&  
-      p[4] == 0x69 &&  
-      p[5] == 0x64)    
-  {
-    r0 = 0; // hợp lệ
-  }
-  else
-  {
-    r0 = 1; // không hợp lệ
-  }
+  u32 match = (pt[0] == '{') &
+              (pt[1] == '"') &
+              (pt[2] == 'g') &
+              (pt[3] == 'u') &
+              (pt[4] == 'i') &
+              (pt[5] == 'd');
 
+  const u32 r0 = match;
   const u32 r1 = 0;
   const u32 r2 = 0;
   const u32 r3 = 0;
 
   #define il_pos 0
-
   #ifdef KERNEL_STATIC
   #include COMPARE_M
   #endif
